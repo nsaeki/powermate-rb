@@ -1,0 +1,4 @@
+Ruby library for Griffin PowerMate.
+
+This script refers to following Linux driver source.
+http://lxr.free-electrons.com/source/drivers/input/misc/powermate.c
