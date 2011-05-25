@@ -60,44 +60,51 @@ class PowerMate
     send_control_msg(SET_STATIC_BRIGHTNESS, @brightness)
   end
 
-  def pulse(speed=256)
+  def pulse(speed=255)
     speed = 0 if speed < 0
-    speed = 511 if speed > 511
+    speed = 510 if speed > 510
     @pulse_speed = speed
 
     case pulse_speed
-    when 0..255
+    when 0..254
       op = 0
-      arg = 256 - pulse_speed
-    when 256
+      arg = 255 - pulse_speed
+    when 255
       op = 1
       arg = 0
-    when 256..511
+    when 256..510
       op = 2
-      arg = pulse_speed - 256
+      arg = pulse_speed - 255
     end
     pulse_table = 0             # 0,1,2 valid
-#    send_control_msg((pulse_table << 8) | SET_PULSE_MODE, (arg << 8) | op)
-    send_control_msg(op << 1, (arg << 8))
+    #send_control_msg((pulse_table << 8) | SET_PULSE_MODE, (arg << 8) | op)
   end
   
   def pulse_asleep=(value)
     @pulse_asleep = value ? true : false
-    send_control_msg(SET_PULSE_ASLEEP, (@pulse_asleep) ? 1 : 0)
+    #send_control_msg(SET_PULSE_ASLEEP, pulse_asleep ? 1 : 0)
   end
   
   def pulse_awake=(value)
     @pulse_awake = value ? true : false
-    #send_control_msg(SET_PULSE_AWAKE, (@pulse_awake) ? 1 : 0)
-    send_control_msg((@pulse_awake ? 1 : 0) << 4, 0)
+    #send_control_msg(SET_PULSE_AWAKE, pulse_awake ? 1 : 0)
   end
   
-  def sync_state
-  end
-
   attr_reader :handle, :device, :brightness, :pulse_speed, :pulse_awake, :pulse_asleep
 
   private
+
+  def sync_state
+    # usb_control_msg(int, int, int, int, int, int)
+    # |--------|--------||--------|--------||--------|--------||--------|--------|
+    #    0x41               0x01               type              value    
+    # type, value bits.
+    #    blank   awake(1) asleep(1)  pulse_mode(2) speed(8)  brightness(8)
+    #    23-21   20       19         18-17         16-8      7-0
+    type = value = 0
+    #send_control_msg((@pulse_awake ? 1 : 0) << 4, 0)
+    send_control_msg(type, value, bytes, timeout)
+  end
 
   def send_control_msg(type, value, bytes='', timeout=-1)
     if connected?
