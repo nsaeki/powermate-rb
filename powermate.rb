@@ -116,8 +116,10 @@ class PowerMate
     #              value                      |    index
     #    awake(1) asleep(1)  pulse_mode(2)  speed(9)  brightness(8)
     #      20       19         18-17         16-8        7-0
+    asleep = pulse_asleep ? 1 : 0
+    awake = pulse_awake ? 1 : 0
     data = brightness | (pulse_speed << 8) | (pulse_table << 17) |
-           (pulse_asleep << 19) | (pulse_awake << 20)
+           (asleep << 19) | (awake << 20)
     value = data >> 16
     index = data & 0xff
     send_control_msg(value, index)
