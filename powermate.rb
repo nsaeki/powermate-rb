@@ -19,25 +19,39 @@ class PowerMate
       USB.devices.each do |device|
         if device.idVendor == VENDOR_ID and
             (device.idProduct == PRODUCT_ID_NEW or
-             devices.idProduct == PRODUCT_ID_OLD)
+             device.idProduct == PRODUCT_ID_OLD)
           return new(device)
         end
       end
     end
 
     def find_all
+      throw StandardError("Not implemented.")
     end
   end
 
   def initialize(device)
     @device = device
+    @auto_sync = true
+
+    # set initial state arbitary because current device
+    # status is unable to be retrieved.
+    @brightness = 255
+    @pulse_table = 0
+    @pulse_speed = 255
+    @pulse_asleep = false
+    @pulse_awake = false
   end
 
   def connect
     if block_given?
-      device.open do |handle|
-        @handle = handle
-        yield self
+      begin
+        device.open do |handle|
+          @handle = handle
+          yield self
+        end
+      ensure
+        @handle = nil
       end
     else
       @handle = device.open unless connected?
@@ -53,33 +67,36 @@ class PowerMate
     @handle != nil
   end
 
+  def auto_sync=(value)
+    @auto_sync = value ? true : false
+  end
+
   def brightness=(value)
     value = 0 if value < 0
     value = 255 if value > 255
     @brightness = value
-    send_control_msg(SET_STATIC_BRIGHTNESS, @brightness)
+    #send_control_msg(SET_STATIC_BRIGHTNESS, @brightness)
   end
 
-  def pulse(speed=255)
+  def pulse
+    @pulse_speed = 255
+    @pulse_awake = true
+  end
+  
+  def pulse_table=(table)
+    table = 0 if table < 0
+    table = 2 if table > 2
+    @pulse_table = table
+  end
+
+  def pulse_speed=(speed)
     speed = 0 if speed < 0
     speed = 510 if speed > 510
     @pulse_speed = speed
-
-    case pulse_speed
-    when 0..254
-      op = 0
-      arg = 255 - pulse_speed
-    when 255
-      op = 1
-      arg = 0
-    when 256..510
-      op = 2
-      arg = pulse_speed - 255
-    end
-    pulse_table = 0             # 0,1,2 valid
-    #send_control_msg((pulse_table << 8) | SET_PULSE_MODE, (arg << 8) | op)
+    #op, arg = extract_pulse_params(@pulse_speed)
+    #send_control_msg(SET_PULSE_MODE, (arg << 8) | op)
   end
-  
+
   def pulse_asleep=(value)
     @pulse_asleep = value ? true : false
     #send_control_msg(SET_PULSE_ASLEEP, pulse_asleep ? 1 : 0)
@@ -90,26 +107,62 @@ class PowerMate
     #send_control_msg(SET_PULSE_AWAKE, pulse_awake ? 1 : 0)
   end
   
-  attr_reader :handle, :device, :brightness, :pulse_speed, :pulse_awake, :pulse_asleep
-
-  private
-
   def sync_state
-    # usb_control_msg(int, int, int, int, int, int)
+    # packs state in value and index.
+    # usb_control_msg(0x41, 0x01, value, index, ...)
     # |--------|--------||--------|--------||--------|--------||--------|--------|
-    #    0x41               0x01               type              value    
-    # type, value bits.
-    #    blank   awake(1) asleep(1)  pulse_mode(2) speed(8)  brightness(8)
-    #    23-21   20       19         18-17         16-8      7-0
-    type = value = 0
-    #send_control_msg((@pulse_awake ? 1 : 0) << 4, 0)
-    send_control_msg(type, value, bytes, timeout)
+    #        0x41               0x01               value              index    
+    # value / index bits are
+    #              value                      |    index
+    #    awake(1) asleep(1)  pulse_mode(2)  speed(9)  brightness(8)
+    #      20       19         18-17         16-8        7-0
+    data = brightness | (pulse_speed << 8) | (pulse_table << 17) |
+           (pulse_asleep << 19) | (pulse_awake << 20)
+    value = data >> 16
+    index = data & 0xff
+    send_control_msg(value, index)
   end
 
-  def send_control_msg(type, value, bytes='', timeout=-1)
+  attr_reader :handle, :device, :auto_sync, :brightness,
+              :pulse_table, :pulse_speed, :pulse_awake, :pulse_asleep
+
+  def self.auto_sync_functions(*methods)
+    methods.each do |m|
+      original = "#{m}_old"
+      alias_method original, m
+      private original
+      puts "#{m} aliased to #{original}"
+      define_method(m) do |*args|
+        send(original, *args)
+        sync_state if auto_sync
+      end
+    end
+  end
+
+  auto_sync_functions :brightness=, :pulse_mode=, :pulse_table=,
+                      :pulse_speed=, :pulse_awake=, :pulse_asleep=, :pulse
+  
+  private
+
+  def extract_pulse_params(speed)
+    case speed
+    when 0..254
+      op = 0
+      arg = 255 - speed
+    when 255
+      op = 1
+      arg = 0
+    when 256..510
+      op = 2
+      arg = speed - 255
+    end
+    return op, arg
+  end
+
+  def send_control_msg(value, index, bytes='', timeout=-1)
     if connected?
-      puts("send #{type}, #{value}")
-      handle.usb_control_msg(0x41, 0x01, type, value, bytes, timeout)
+      puts("send #{value}, #{index}")
+      handle.usb_control_msg(0x41, 0x01, value, index, bytes, timeout)
     end
   end
 end
