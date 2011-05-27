@@ -59,7 +59,7 @@ class PowerMate
   end
 
   def disconnect
-    device.close if connected?
+    handle.usb_close if connected?
     @handle = nil
   end
     
@@ -130,10 +130,9 @@ class PowerMate
 
   def self.auto_sync_functions(*methods)
     methods.each do |m|
-      original = "#{m}_old"
+      original = "__original_#{m}"
       alias_method original, m
       private original
-      puts "#{m} aliased to #{original}"
       define_method(m) do |*args|
         send(original, *args)
         sync_state if auto_sync
@@ -141,9 +140,16 @@ class PowerMate
     end
   end
 
-  auto_sync_functions :brightness=, :pulse_mode=, :pulse_table=,
-                      :pulse_speed=, :pulse_awake=, :pulse_asleep=, :pulse
+  auto_sync_functions :brightness=, :pulse_table=, :pulse_table=,
+                      :pulse_awake=, :pulse_asleep=, :pulse
   
+  def send_control_msg(value, index, bytes='', timeout=-1)
+    if connected?
+      puts("send #{value}, #{index}")
+      handle.usb_control_msg(0x41, 0x01, value, index, bytes, timeout)
+    end
+  end
+
   private
 
   def extract_pulse_params(speed)
@@ -159,12 +165,5 @@ class PowerMate
       arg = speed - 255
     end
     return op, arg
-  end
-
-  def send_control_msg(value, index, bytes='', timeout=-1)
-    if connected?
-      puts("send #{value}, #{index}")
-      handle.usb_control_msg(0x41, 0x01, value, index, bytes, timeout)
-    end
   end
 end
