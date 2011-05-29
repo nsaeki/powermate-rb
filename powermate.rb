@@ -14,33 +14,30 @@ class PowerMate
   SET_PULSE_AWAKE        = 0x03
   SET_PULSE_MODE         = 0x04
 
+  REQUEST_TYPE = 0x04
+  REQUEST = 0x01
+
+  EV_KEY = 0x01
+  EV_REL = 0x02
+  EV_ABS = 0x03
+  EV_MSC = 0x04
+  EV_LED = 0x11
+  MSC_PULSELED = 0x01
+
   class << self
-    def find_any
+    def find_device
       USB.devices.each do |device|
         if device.idVendor == VENDOR_ID and
             (device.idProduct == PRODUCT_ID_NEW or
              device.idProduct == PRODUCT_ID_OLD)
-          return new(device)
+          return device
         end
       end
     end
-
-    def find_all
-      throw StandardError("Not implemented.")
-    end
   end
 
-  def initialize(device)
-    @device = device
-    @auto_sync = true
-
-    # set initial state arbitary because current device
-    # status is unable to be retrieved.
-    @brightness = 255
-    @pulse_table = 0
-    @pulse_speed = 255
-    @pulse_asleep = false
-    @pulse_awake = false
+  def initialize(device = nil)
+    @device = device || PowerMate::find_device
   end
 
   def connect
@@ -67,15 +64,11 @@ class PowerMate
     @handle != nil
   end
 
-  def auto_sync=(value)
-    @auto_sync = value ? true : false
-  end
-
   def brightness=(value)
     value = 0 if value < 0
     value = 255 if value > 255
     @brightness = value
-    #send_control_msg(SET_STATIC_BRIGHTNESS, @brightness)
+    send_control_msg(SET_STATIC_BRIGHTNESS, @brightness)
   end
 
   def pulse
@@ -89,66 +82,27 @@ class PowerMate
     @pulse_table = table
   end
 
-  def pulse_speed=(speed)
+  def pulse_speed=(speed, table=0)
     speed = 0 if speed < 0
     speed = 510 if speed > 510
     @pulse_speed = speed
-    #op, arg = extract_pulse_params(@pulse_speed)
-    #send_control_msg(SET_PULSE_MODE, (arg << 8) | op)
+
+    op, arg = extract_pulse_params(@pulse_speed)
+    send_control_msg((pulse_table << 8) | SET_PULSE_MODE, (arg << 8) | op)
   end
 
   def pulse_asleep=(value)
     @pulse_asleep = value ? true : false
-    #send_control_msg(SET_PULSE_ASLEEP, pulse_asleep ? 1 : 0)
+    send_control_msg(SET_PULSE_ASLEEP, pulse_asleep ? 1 : 0)
   end
   
   def pulse_awake=(value)
     @pulse_awake = value ? true : false
-    #send_control_msg(SET_PULSE_AWAKE, pulse_awake ? 1 : 0)
+    send_control_msg(SET_PULSE_AWAKE, pulse_awake ? 1 : 0)
   end
   
-  def sync_state
-    # packs state in value and index.
-    # usb_control_msg(0x41, 0x01, value, index, ...)
-    # |--------|--------||--------|--------||--------|--------||--------|--------|
-    #        0x41               0x01               value              index    
-    # value / index bits are
-    #              value                      |    index
-    #    awake(1) asleep(1)  pulse_mode(2)  speed(9)  brightness(8)
-    #      20       19         18-17         16-8        7-0
-    asleep = pulse_asleep ? 1 : 0
-    awake = pulse_awake ? 1 : 0
-    data = brightness | (pulse_speed << 8) | (pulse_table << 17) |
-           (asleep << 19) | (awake << 20)
-    value = data >> 16
-    index = data & 0xff
-    send_control_msg(value, index)
-  end
-
   attr_reader :handle, :device, :auto_sync, :brightness,
               :pulse_table, :pulse_speed, :pulse_awake, :pulse_asleep
-
-  def self.auto_sync_functions(*methods)
-    methods.each do |m|
-      original = "__original_#{m}"
-      alias_method original, m
-      private original
-      define_method(m) do |*args|
-        send(original, *args)
-        sync_state if auto_sync
-      end
-    end
-  end
-
-  auto_sync_functions :brightness=, :pulse_table=, :pulse_table=,
-                      :pulse_awake=, :pulse_asleep=, :pulse
-  
-  def send_control_msg(value, index, bytes='', timeout=-1)
-    if connected?
-      puts("send #{value}, #{index}")
-      handle.usb_control_msg(0x41, 0x01, value, index, bytes, timeout)
-    end
-  end
 
   private
 
@@ -166,4 +120,28 @@ class PowerMate
     end
     return op, arg
   end
+
+  def send_control_msg(value, index, bytes='', timeout=0)
+    if connected?
+      puts("send #{value}, #{index}")
+      handle.usb_control_msg(REQUEST_TYPE, REQUEST, value, index, bytes, timeout)
+    end
+  end
+  
+  EVENT_SIZE = 16
+  def handle_input_event
+    if connected?
+      buffer = '0' * 16
+      nbytes = handle.usb_bulk_read(0, buffer, 0)
+      p buffer.size
+      p nbytes
+      p buffer
+      if nbytes > 0
+        rawevent = buffer.unpack("l!l!s!s!i")
+        p rawevent
+      end
+    end
+  end
+  
+  public :handle_input_event
 end
