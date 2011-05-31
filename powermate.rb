@@ -14,7 +14,7 @@ class PowerMate
   SET_PULSE_AWAKE        = 0x03
   SET_PULSE_MODE         = 0x04
 
-  REQUEST_TYPE = 0x04
+  REQUEST_TYPE = 0x41
   REQUEST = 0x01
 
   EV_KEY = 0x01
@@ -132,7 +132,9 @@ class PowerMate
   def handle_input_event
     if connected?
       buffer = '0' * 16
-      nbytes = handle.usb_bulk_read(0, buffer, 0)
+      ep = device.endpoints[0].bEndpointAddress
+      p ep
+      nbytes = handle.usb_bulk_read(ep, buffer, 0)
       p buffer.size
       p nbytes
       p buffer
